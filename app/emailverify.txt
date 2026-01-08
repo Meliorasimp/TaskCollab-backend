@@ -1,0 +1,174 @@
+1. User Model
+
+public class User
+{
+    public int Id { get; set; }
+    public string Email { get; set; }
+    public string Password { get; set; }
+    public string Name { get; set; }
+    
+    // Email verification fields
+    public bool EmailVerified { get; set; } = false;
+    public string? EmailVerificationToken { get; set; }
+    public DateTime? EmailVerificationTokenExpiry { get; set; }
+}
+
+2. Registration Logic (UserMutation.cs)
+
+public async Task<UserPayload> RegisterUser(UserInput input, [Service] AppDbContext context, [Service] IEmailService emailService)
+{
+    // Check if user exists
+    if (await context.Users.AnyAsync(u => u.Email == input.Email))
+    {
+        throw new GraphQLException("Email already exists");
+    }
+    
+    // Hash password
+    string hashedPassword = BCrypt.Net.BCrypt.HashPassword(input.Password);
+    
+    // Generate verification token
+    string verificationToken = Guid.NewGuid().ToString();
+    
+    // Create user
+    var user = new User
+    {
+        Email = input.Email,
+        Name = input.Name,
+        Password = hashedPassword,
+        EmailVerified = false,
+        EmailVerificationToken = verificationToken,
+        EmailVerificationTokenExpiry = DateTime.UtcNow.AddHours(24)
+    };
+    
+    context.Users.Add(user);
+    await context.SaveChangesAsync();
+    
+    // Send verification email
+    await emailService.SendVerificationEmailAsync(user.Email, user.Name, verificationToken);
+    
+    return new UserPayload { User = user };
+}
+
+3. Email Verification Logic (UserMutation.cs)
+
+public async Task<string> VerifyEmail(string token, [Service] AppDbContext context)
+{
+    // Find user by token
+    var user = await context.Users.FirstOrDefaultAsync(u => u.EmailVerificationToken == token);
+    
+    if (user == null)
+    {
+        throw new GraphQLException("Invalid verification token");
+    }
+    
+    // Check if token expired
+    if (user.EmailVerificationTokenExpiry < DateTime.UtcNow)
+    {
+        throw new GraphQLException("Verification token has expired");
+    }
+    
+    // Verify the email
+    user.EmailVerified = true;
+    user.EmailVerificationToken = null;
+    user.EmailVerificationTokenExpiry = null;
+    
+    await context.SaveChangesAsync();
+    
+    return "Email verified successfully";
+}
+
+4. Email Service Interface
+
+public interface IEmailService
+{
+    Task SendVerificationEmailAsync(string toEmail, string userName, string verificationToken);
+}
+
+5. Email Service Implementation
+
+public class EmailService : IEmailService
+{
+    private readonly IConfiguration _configuration;
+    
+    public EmailService(IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
+    
+    public async Task SendVerificationEmailAsync(string toEmail, string userName, string verificationToken)
+    {
+        string smtpHost = _configuration["Email:SmtpHost"];
+        int smtpPort = int.Parse(_configuration["Email:SmtpPort"]);
+        string smtpUser = _configuration["Email:SmtpUser"];
+        string smtpPass = _configuration["Email:SmtpPassword"];
+        string frontendUrl = _configuration["Email:FrontendUrl"];
+        
+        string verificationUrl = $"{frontendUrl}/verify-email?token={verificationToken}";
+        
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("TaskCollab", smtpUser));
+        message.To.Add(new MailboxAddress(userName, toEmail));
+        message.Subject = "Verify your email address";
+        
+        message.Body = new TextPart("html")
+        {
+            Text = $@"
+                <h2>Welcome to TaskCollab!</h2>
+                <p>Hi {userName},</p>
+                <p>Please verify your email address by clicking the link below:</p>
+                <a href='{verificationUrl}'>Verify Email</a>
+                <p>This link will expire in 24 hours.</p>
+            "
+        };
+        
+        using var client = new SmtpClient();
+        await client.ConnectAsync(smtpHost, smtpPort, MailKit.Security.SecureSocketOptions.StartTls);
+        await client.AuthenticateAsync(smtpUser, smtpPass);
+        await client.SendAsync(message);
+        await client.DisconnectAsync(true);
+    }
+}
+
+6. Resend Verification Logic (UserMutation.cs)
+
+public async Task<string> ResendVerificationEmail(string email, [Service] AppDbContext context, [Service] IEmailService emailService)
+{
+    var user = await context.Users.FirstOrDefaultAsync(u => u.Email == email);
+    
+    if (user == null)
+    {
+        throw new GraphQLException("User not found");
+    }
+    
+    if (user.EmailVerified)
+    {
+        throw new GraphQLException("Email already verified");
+    }
+    
+    // Generate new token
+    user.EmailVerificationToken = Guid.NewGuid().ToString();
+    user.EmailVerificationTokenExpiry = DateTime.UtcNow.AddHours(24);
+    
+    await context.SaveChangesAsync();
+    
+    // Send email
+    await emailService.SendVerificationEmailAsync(user.Email, user.Name, user.EmailVerificationToken);
+    
+    return "Verification email sent";
+}
+
+7. Program.cs Registration
+
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+8. appsettings.json
+
+{
+  "Email": {
+    "SmtpHost": "smtp.gmail.com",
+    "SmtpPort": "587",
+    "SmtpUser": "your-email@gmail.com",
+    "SmtpPassword": "your-app-password",
+    "FrontendUrl": "http://localhost:5173"
+  }
+}
