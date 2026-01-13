@@ -44,5 +44,6 @@ namespace app.Service
             await client.SendAsync(message);
             await client.DisconnectAsync(true);
         }
+
     }
 }

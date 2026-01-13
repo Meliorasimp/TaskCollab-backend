@@ -9,4 +9,9 @@ namespace app.Interface
     {
         Task SendVerificationEmailAsync(string toEmail, string userName, string verificationToken);
     }
+
+    public interface IDummyEmailService
+    {
+        Task SendDummyEmailAsync(string to, string subject, string body);
+    }
 }
