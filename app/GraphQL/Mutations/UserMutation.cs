@@ -15,6 +15,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace app.GraphQL.Mutations
 {
+    [ExtendObjectType(typeof(Mutation))]
     public class UserMutation
     {
         public async Task<UserPayload> RegisterUser([Service] AppDbContext context, UserInput input) 

@@ -18,6 +18,8 @@ builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email
 
 builder.Services.AddScoped<IDummyEmailService, DummyEmailService>();
 
+builder.Services.AddHttpContextAccessor();
+
 builder.Services.AddAuthentication("Bearer").AddJwtBearer("Bearer", options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
@@ -40,7 +42,10 @@ builder.Services.AddControllers();
 builder.Services
     .AddGraphQLServer()
     .AddQueryType<Query>()
-    .AddMutationType<UserMutation>();
+    .AddMutationType<Mutation>()
+    .AddTypeExtension<UserMutation>()
+    .AddTypeExtension<TeamMutation>()
+    .AddAuthorization();
 
 builder.Services.AddCors(options => {
     options.AddPolicy("AllowFrontendOrigin", policy => {
